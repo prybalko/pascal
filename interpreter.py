@@ -1,4 +1,15 @@
-# Tokens
+""" SPI - Simple Pascal Interpreter """
+
+###############################################################################
+#                                                                             #
+#  LEXER                                                                      #
+#                                                                             #
+###############################################################################
+
+# Token types
+#
+# EOF (end-of-file) token is used to indicate that
+# there is no more input left for lexical analysis
 
 INTEGER = 'INTEGER'
 PLUS = 'PLUS'
@@ -19,7 +30,7 @@ class Token(object):
         return '{}({}, {})'.format(self.__class__.__name__, self.type, self.value)
 
 
-class Parser(object):
+class Lexer(object):
     def __init__(self, text):
         self.text = text.strip()
         self.current_pos = 0
@@ -84,6 +95,13 @@ class Parser(object):
         raise SyntaxError('Symbol "{}" is not supported'.format(char))
 
 
+###############################################################################
+#                                                                             #
+#  PARSER                                                                     #
+#                                                                             #
+###############################################################################
+
+
 class AstNode(object):
     def __init__(self, op, left=None, right=None):
         self.left = left
@@ -91,8 +109,7 @@ class AstNode(object):
         self.right = right
 
     def visit(self):
-        method_name = 'visit_{}'.format(self.__class__.__name__)
-        return getattr(self, method_name)()
+        raise NotImplementedError
 
     def __repr__(self):
         return '{}({}, {}, {})'.format(self.__class__.__name__,
@@ -102,7 +119,7 @@ class AstNode(object):
 
 
 class BinOp(AstNode):
-    def visit_BinOp(self):
+    def visit(self):
         left = self.left.visit()
         right = self.right.visit()
         if self.op.type == PLUS:
@@ -115,22 +132,37 @@ class BinOp(AstNode):
             return left / right
 
 
+class UnaryOp(AstNode):
+    def visit(self):
+        value = self.left.visit()
+        if self.op.type == MINUS:
+            return -1 * value
+        if self.op.type == PLUS:
+            return value
+        raise Exception('Unsupported unary operation')
+
+
 class NumNode(AstNode):
-    def visit_NumNode(self):
+    def visit(self):
         return self.value_token.value
 
 
-class Lexer(object):
-    def __init__(self, parser):
-        self.parser = parser
-        self.current_token = self.parser.get_next_token()
+class Parser(object):
+    def __init__(self, lexer):
+        self.lexer = lexer
+        self.current_token = self.lexer.get_next_token()
 
     def eat(self, expected_type):
         if not self.current_token.type == expected_type:
             raise ValueError('Unexpected token. Expected {}, got {}'.format(expected_type, self.current_token.type))
-        self.current_token = self.parser.get_next_token()
+        self.current_token = self.lexer.get_next_token()
 
     def expr(self):
+        """
+            expr   : term ((PLUS | MINUS) term)*
+            term   : factor ((MUL | DIV) factor)*
+            factor : INTEGER | LPAREN expr RPAREN
+        """
         result = self.term()
         while self.current_token.type in (PLUS, MINUS):
             op = self.current_token
@@ -158,7 +190,18 @@ class Lexer(object):
             result = self.expr()
             self.eat(RPAREN)
             return result
-        raise ValueError('Unsupported token type. Got {}'.format(token))
+        if token.type in (PLUS, MINUS):
+            self.eat(token.type)
+            operand = self.factor()
+            return UnaryOp(token, operand)
+        raise ValueError('Unexpected token type. Got {}'.format(token))
+
+
+###############################################################################
+#                                                                             #
+#  INTERPRETER                                                                #
+#                                                                             #
+###############################################################################
 
 
 class Interpreter(object):
@@ -173,7 +216,7 @@ class Interpreter(object):
 if __name__ == '__main__':
     while True:
         text = raw_input('calc> ')
-        parser = Parser(text)
-        lexer = Lexer(parser)
-        interpreter = Interpreter(lexer)
+        lexer = Lexer(text)
+        parser = Parser(lexer)
+        interpreter = Interpreter(parser)
         print interpreter.execute()
