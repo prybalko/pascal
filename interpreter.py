@@ -21,7 +21,7 @@ class Token(object):
 
 class Parser(object):
     def __init__(self, text):
-        self.text = text
+        self.text = text.strip()
         self.current_pos = 0
 
     def advance(self):
@@ -37,6 +37,13 @@ class Parser(object):
         while self.current_pos < len(self.text) and self.text[self.current_pos].isspace():
             self.advance()
 
+    def digit(self):
+        num = ''
+        while self.current_pos < len(self.text) and self.text[self.current_pos].isdigit():
+            num += self.text[self.current_pos]
+            self.advance()
+        return num
+
     def get_next_token(self):
         if not self.current_pos < len(self.text):
             return Token(EOF)
@@ -47,8 +54,8 @@ class Parser(object):
         char = self.text[self.current_pos]
 
         if char.isdigit():
-            self.advance()
-            return Token(INTEGER, int(char))
+            num = self.digit()
+            return Token(INTEGER, int(num))
 
         if char == '+':
             self.advance()
@@ -65,6 +72,14 @@ class Parser(object):
         if char == '/':
             self.advance()
             return Token(DIV)
+
+        if char == '(':
+            self.advance()
+            return Token(LPAREN)
+
+        if char == ')':
+            self.advance()
+            return Token(RPAREN)
 
         raise SyntaxError('Symbol "{}" is not supported'.format(char))
 
@@ -138,6 +153,11 @@ class Lexer(object):
         if token.type == INTEGER:
             self.eat(INTEGER)
             return NumNode(token)
+        if token.type == LPAREN:
+            self.eat(LPAREN)
+            result = self.expr()
+            self.eat(RPAREN)
+            return result
         raise ValueError('Unsupported token type. Got {}'.format(token))
 
 
@@ -147,12 +167,12 @@ class Interpreter(object):
 
     def execute(self):
         root_node = self.lexer.expr()
-        return root_node
+        return root_node.visit()
 
 
 if __name__ == '__main__':
     while True:
-        text = raw_input('calc>')
+        text = raw_input('calc> ')
         parser = Parser(text)
         lexer = Lexer(parser)
         interpreter = Interpreter(lexer)
