@@ -238,7 +238,7 @@ class BinOp(AstNode):
         if self.op.type == MUL:
             return left * right
         if self.op.type == INTEGER_DIV:
-            return int(left / right)
+            return left // right
         if self.op.type == FLOAT_DIV:
             return float(left) / right
 
