@@ -11,21 +11,28 @@
 # EOF (end-of-file) token is used to indicate that
 # there is no more input left for lexical analysis
 
-INTEGER = 'INTEGER'
-PLUS = 'PLUS'
-MINUS = 'MINUS'
-MUL = 'MUL'
-DIV = 'DIV'
-LPAREN = 'LPAREN'
-RPAREN = 'RPAREN'
-EOF = 'EOF'
-
-BEGIN = 'BEGIN'
-END = 'END'
-DOT = 'DOT'
-ID = 'ID'
-ASSIGN = 'ASSIGN'
-SEMI = 'SEMI'
+INTEGER       = 'INTEGER'
+REAL          = 'REAL'
+INTEGER_CONST = 'INTEGER_CONST'
+REAL_CONST    = 'REAL_CONST'
+PLUS          = 'PLUS'
+MINUS         = 'MINUS'
+MUL           = 'MUL'
+INTEGER_DIV   = 'INTEGER_DIV'
+FLOAT_DIV     = 'FLOAT_DIV'
+LPAREN        = 'LPAREN'
+RPAREN        = 'RPAREN'
+ID            = 'ID'
+ASSIGN        = 'ASSIGN'
+BEGIN         = 'BEGIN'
+END           = 'END'
+SEMI          = 'SEMI'
+DOT           = 'DOT'
+PROGRAM       = 'PROGRAM'
+VAR           = 'VAR'
+COLON         = 'COLON'
+COMMA         = 'COMMA'
+EOF           = 'EOF'
 
 
 class Token(object):
@@ -38,8 +45,13 @@ class Token(object):
 
 
 RESERVED_KEYWORDS = {
-    'BEGIN': Token('BEGIN'),
-    'END': Token('END'),
+    'PROGRAM': Token(PROGRAM, 'PROGRAM'),
+    'VAR': Token(VAR, 'VAR'),
+    'DIV': Token(INTEGER_DIV, 'DIV'),
+    'INTEGER': Token(INTEGER, 'INTEGER'),
+    'REAL': Token(REAL, 'REAL'),
+    'BEGIN': Token(BEGIN, 'BEGIN'),
+    'END': Token(END, 'END'),
 }
 
 GLOBAL_SCOPE = {}
@@ -70,12 +82,26 @@ class Lexer(object):
         while self.current_pos < len(self.text) and self.text[self.current_pos].isspace():
             self.advance()
 
-    def number(self):
-        num = ''
-        while self.current_pos < len(self.text) and self.text[self.current_pos].isdigit():
-            num += self.text[self.current_pos]
+    def skip_comment(self):
+        while not self.text[self.current_pos] == '}':
             self.advance()
-        return num
+        self.advance()  # the closing curly brace
+
+    def number(self):
+        """Return a (multidigit) integer or float consumed from the input."""
+        result = ''
+        while self.current_pos < len(self.text) and self.text[self.current_pos].isdigit():
+            result += self.text[self.current_pos]
+            self.advance()
+        if not self.text[self.current_pos] == '.':
+            return Token(INTEGER_CONST, int(result))
+
+        result += '.'
+        self.advance()
+        while self.current_pos < len(self.text) and self.text[self.current_pos].isdigit():
+            result += self.text[self.current_pos]
+            self.advance()
+        return Token(REAL_CONST, float(result))
 
     def _id(self):
         """Handle identifiers and reserved keywords"""
@@ -89,17 +115,21 @@ class Lexer(object):
         if not self.current_pos < len(self.text):
             return Token(EOF)
 
-        if self.text[self.current_pos].isspace():
-            self.skip_whitespace()
-
         char = self.text[self.current_pos]
+
+        if char.isspace():
+            self.skip_whitespace()
+            return self.get_next_token()
+
+        if char == '{':
+            self.skip_comment()
+            return self.get_next_token()
 
         if char.isalpha():
             return self._id()
 
         if char.isdigit():
-            num = self.number()
-            return Token(INTEGER, int(num))
+            return self.number()
 
         if char == '+':
             self.advance()
@@ -115,7 +145,7 @@ class Lexer(object):
 
         if char == '/':
             self.advance()
-            return Token(DIV, '/')
+            return Token(FLOAT_DIV, '/')
 
         if char == '(':
             self.advance()
@@ -130,6 +160,10 @@ class Lexer(object):
             self.advance()
             return Token(ASSIGN, ':=')
 
+        if char == ':':
+            self.advance()
+            return Token(COLON, ':')
+
         if char == ';':
             self.advance()
             return Token(SEMI, ';')
@@ -137,6 +171,10 @@ class Lexer(object):
         if char == '.':
             self.advance()
             return Token(DOT, '.')
+
+        if char == ',':
+            self.advance()
+            return Token(COMMA, ',')
 
         raise SyntaxError('Symbol "{}" is not supported'.format(char))
 
@@ -157,6 +195,33 @@ class AstNode(object):
                                ', '.join([attr for attr in dir() if not attr == 'self']))
 
 
+class ProgramNode(AstNode):
+    def __init__(self, name, block):
+        self.name = name
+        self.block = block
+
+    def visit(self):
+        self.block.visit()
+
+
+class BlockNode(AstNode):
+    def __init__(self, declarations, compound_statement):
+        self.declarations = declarations
+        self.compound_statement = compound_statement
+
+    def visit(self):
+        self.compound_statement.visit()
+
+
+class VarDeclNode(AstNode):
+    def __init__(self, var_node, type_node):
+        self.var_node = var_node
+        self.type_node = type_node
+
+    def visit(self):
+        pass
+
+
 class BinOp(AstNode):
     def __init__(self, op, left, right):
         self.left = left
@@ -172,8 +237,10 @@ class BinOp(AstNode):
             return left - right
         if self.op.type == MUL:
             return left * right
-        if self.op.type == DIV:
-            return left / right
+        if self.op.type == INTEGER_DIV:
+            return int(left / right)
+        if self.op.type == FLOAT_DIV:
+            return float(left) / right
 
 
 class UnaryOp(AstNode):
@@ -246,10 +313,46 @@ class Parser(object):
         self.current_token = self.lexer.get_next_token()
 
     def program(self):
-        """program : compound_statement DOT"""
-        compound = self.compound_statement()
+        """program : PROGRAM variable SEMI block DOT"""
+        self.eat(PROGRAM)
+        name = self.current_token.value
+        self.eat(ID)
+        self.eat(SEMI)
+        block = self.block()
         self.eat(DOT)
-        return compound
+        return ProgramNode(name, block)
+
+    def block(self):
+        """block : declarations compound_statement"""
+        return BlockNode(self.declarations(), self.compound_statement())
+
+    def declarations(self):
+        """declarations : VAR (variable_declaration SEMI)+
+                        | empty
+        """
+
+        if not self.current_token.type == VAR:
+            return self.empty()
+
+        self.eat(VAR)
+        declarations = []
+        while self.current_token.type == ID:
+            declarations += self.variable_declaration()
+            self.eat(SEMI)
+        return declarations
+
+    def variable_declaration(self):
+        """variable_declaration : ID (COMMA ID)* COLON type_spec"""
+        var_names = [self.current_token.value]
+        self.eat(ID)
+        while self.current_token.type == COMMA:
+            self.eat(COMMA)
+            var_names.append(self.current_token.value)
+            self.eat(ID)
+        self.eat(COLON)
+        type_spec = self.current_token
+        self.eat(type_spec.type)
+        return [VarDeclNode(name, type_spec) for name in var_names]
 
     def compound_statement(self):
         """
@@ -321,8 +424,9 @@ class Parser(object):
         return result
 
     def term(self):
+        """term : factor ((MUL | INTEGER_DIV | FLOAT_DIV) factor)*"""
         result = self.factor()
-        while self.current_token.type in (MUL, DIV):
+        while self.current_token.type in (MUL, INTEGER_DIV, FLOAT_DIV):
             op = self.current_token
             self.eat(self.current_token.type)
             right = self.factor()
@@ -330,25 +434,29 @@ class Parser(object):
         return result
 
     def factor(self):
-        """factor : PLUS  factor
-                  | MINUS factor
-                  | INTEGER
-                  | LPAREN expr RPAREN
-                  | variable
+        """factor : PLUS factor
+                   | MINUS factor
+                   | INTEGER_CONST
+                   | REAL_CONST
+                   | LPAREN expr RPAREN
+                   | variable
         """
         token = self.current_token
-        if token.type == INTEGER:
-            self.eat(INTEGER)
+        if token.type in (INTEGER_CONST, REAL_CONST):
+            self.eat(token.type)
             return NumNode(token)
+
         if token.type == LPAREN:
             self.eat(LPAREN)
             result = self.expr()
             self.eat(RPAREN)
             return result
+
         if token.type in (PLUS, MINUS):
             self.eat(token.type)
             operand = self.factor()
             return UnaryOp(token, operand)
+
         if token.type == ID:
             return self.variable()
         raise SyntaxError('Unexpected token type. Got {}'.format(token))
@@ -371,15 +479,28 @@ class Interpreter(object):
 
 
 text = """
-BEGIN
-    BEGIN
-        number := 2;
-        a := number;
-        b := 10 * a + 10 * number / 4;
-        c := a - - b
-    END;
-    x := 11;
-END.
+PROGRAM Part10;
+VAR
+   number     : INTEGER;
+   a, b, c, x : INTEGER;
+   y          : REAL;
+
+BEGIN {Part10}
+   BEGIN
+      number := 2;
+      a := number;
+      b := 10 * a + 10 * number DIV 4;
+      c := a - - b
+   END;
+   x := 11;
+   y := 20 / 7 + 3.14;
+   { writeln('a = ', a); }
+   { writeln('b = ', b); }
+   { writeln('c = ', c); }
+   { writeln('number = ', number); }
+   { writeln('x = ', x); }
+   { writeln('y = ', y); }
+END.  {Part10}
 """
 
 if __name__ == '__main__':
