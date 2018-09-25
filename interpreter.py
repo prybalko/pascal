@@ -10,6 +10,7 @@
 #
 # EOF (end-of-file) token is used to indicate that
 # there is no more input left for lexical analysis
+from collections import OrderedDict
 
 INTEGER       = 'INTEGER'
 REAL          = 'REAL'
@@ -190,6 +191,9 @@ class AstNode(object):
     def visit(self):
         raise NotImplementedError
 
+    def build(self, symtab):
+        raise NotImplementedError
+
     def __repr__(self):
         return '{}({})'.format(self.__class__.__name__,
                                ', '.join([attr for attr in dir() if not attr == 'self']))
@@ -203,6 +207,9 @@ class ProgramNode(AstNode):
     def visit(self):
         self.block.visit()
 
+    def build(self, symtab):
+        self.block.build(symtab)
+
 
 class BlockNode(AstNode):
     def __init__(self, declarations, compound_statement):
@@ -212,6 +219,11 @@ class BlockNode(AstNode):
     def visit(self):
         self.compound_statement.visit()
 
+    def build(self, symtab):
+        for declaration in self.declarations:
+            declaration.build(symtab)
+        self.compound_statement.build(symtab)
+
 
 class VarDeclNode(AstNode):
     def __init__(self, var_node, type_node):
@@ -220,6 +232,13 @@ class VarDeclNode(AstNode):
 
     def visit(self):
         pass
+
+    def build(self, symtab):
+        type_name = self.type_node.value
+        type_symbol = symtab.lookup(type_name)
+        var_name = self.var_node.value
+        var_symbol = VarSymbol(var_name, type_symbol)
+        symtab.define(var_symbol)
 
 
 class BinOp(AstNode):
@@ -242,6 +261,10 @@ class BinOp(AstNode):
         if self.op.type == FLOAT_DIV:
             return float(left) / right
 
+    def build(self, symtab):
+        self.left.build(symtab)
+        self.right.build(symtab)
+
 
 class UnaryOp(AstNode):
     def __init__(self, op, left):
@@ -256,6 +279,9 @@ class UnaryOp(AstNode):
             return value
         raise Exception('Unsupported unary operation')
 
+    def build(self, symtab):
+        self.left.build(symtab)
+
 
 class NumNode(AstNode):
     def __init__(self, token):
@@ -263,6 +289,9 @@ class NumNode(AstNode):
 
     def visit(self):
         return self.token.value
+
+    def build(self, symtab):
+        pass
 
 
 class Compound(AstNode):
@@ -275,6 +304,10 @@ class Compound(AstNode):
         for child in self.children:
             child.visit()
 
+    def build(self, symtab):
+        for child in self.children:
+            child.build(symtab)
+
 
 class Assign(AstNode):
 
@@ -284,6 +317,14 @@ class Assign(AstNode):
 
     def visit(self):
         GLOBAL_SCOPE[self.var.name] = self.value.visit()
+
+    def build(self, symtab):
+        var_name = self.var.name
+        var_symbol = symtab.lookup(var_name)
+        if var_symbol is None:
+            raise NameError(repr(var_name))
+
+        self.value.build(symtab)
 
 
 class Var(AstNode):
@@ -296,10 +337,61 @@ class Var(AstNode):
     def visit(self):
         return GLOBAL_SCOPE[self.id_token.value]
 
+    def build(self, symtab):
+        var_name = self.id_token.value
+        var_symbol = symtab.lookup(var_name)
+
+        if var_symbol is None:
+            raise NameError(repr(var_name))
+
 
 class EmptyNode(AstNode):
     def visit(self):
         pass
+
+    def build(self, symtab):
+        pass
+
+
+class Symbol(object):
+    def __init__(self, name, type=None):
+        self.name = name
+        self.type = type
+
+
+class BuiltinTypeSymbol(Symbol):
+
+    def __str__(self):
+        return self.name
+
+
+class VarSymbol(Symbol):
+
+    def __str__(self):
+        return '<{name}:{type}>'.format(name=self.name, type=self.type)
+
+
+class SymbolTable(object):
+    def __init__(self):
+        self._symbols = OrderedDict()
+        self._init_builtins()
+
+    def _init_builtins(self):
+        self.define(BuiltinTypeSymbol('INTEGER'))
+        self.define(BuiltinTypeSymbol('REAL'))
+
+    def __str__(self):
+        return 'Symbols: {symbols}'.format(symbols=[value for value in self._symbols.values()])
+
+    def define(self, symbol):
+        print('Define: %s' % symbol)
+        self._symbols[symbol.name] = symbol
+
+    def lookup(self, name):
+        print('Lookup: %s' % name)
+        symbol = self._symbols.get(name)
+        # 'symbol' is either an instance of the Symbol class or 'None'
+        return symbol
 
 
 class Parser(object):
@@ -343,11 +435,11 @@ class Parser(object):
 
     def variable_declaration(self):
         """variable_declaration : ID (COMMA ID)* COLON type_spec"""
-        var_names = [self.current_token.value]
+        var_names = [self.current_token]
         self.eat(ID)
         while self.current_token.type == COMMA:
             self.eat(COMMA)
-            var_names.append(self.current_token.value)
+            var_names.append(self.current_token)
             self.eat(ID)
         self.eat(COLON)
         type_spec = self.current_token
@@ -478,34 +570,31 @@ class Interpreter(object):
         return root_node.visit()
 
 
-text = """
-PROGRAM Part10;
-VAR
-   number     : INTEGER;
-   a, b, c, x : INTEGER;
-   y          : REAL;
+class SymbolTableBuilder(object):
+    def __init__(self, lexer):
+        self.symtab = SymbolTable()
+        self.lexer = lexer
 
-BEGIN {Part10}
-   BEGIN
-      number := 2;
-      a := number;
-      b := 10 * a + 10 * number DIV 4;
-      c := a - - b
-   END;
-   x := 11;
-   y := 20 / 7 + 3.14;
-   { writeln('a = ', a); }
-   { writeln('b = ', b); }
-   { writeln('c = ', c); }
-   { writeln('number = ', number); }
-   { writeln('x = ', x); }
-   { writeln('y = ', y); }
-END.  {Part10}
+    def build(self):
+        root_node = self.lexer.program()
+        return root_node.build(self.symtab)
+
+
+text = """
+PROGRAM Part11;
+VAR
+   x, y : INTEGER;
+BEGIN
+   x := 2;
+   y := 3 + x;
+END.
 """
 
 if __name__ == '__main__':
     lexer = Lexer(text)
     parser = Parser(lexer)
-    interpreter = Interpreter(parser)
-    interpreter.execute()
-    print GLOBAL_SCOPE
+    builder = SymbolTableBuilder(parser)
+    builder.build()
+    # interpreter = Interpreter(parser)
+    # interpreter.execute()
+    # print GLOBAL_SCOPE
