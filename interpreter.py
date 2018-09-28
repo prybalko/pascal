@@ -30,6 +30,7 @@ END           = 'END'
 SEMI          = 'SEMI'
 DOT           = 'DOT'
 PROGRAM       = 'PROGRAM'
+PROCEDURE     = 'PROCEDURE'
 VAR           = 'VAR'
 COLON         = 'COLON'
 COMMA         = 'COMMA'
@@ -53,6 +54,7 @@ RESERVED_KEYWORDS = {
     'REAL': Token(REAL, 'REAL'),
     'BEGIN': Token(BEGIN, 'BEGIN'),
     'END': Token(END, 'END'),
+    'PROCEDURE': Token('PROCEDURE', 'PROCEDURE'),
 }
 
 GLOBAL_SCOPE = {}
@@ -211,12 +213,26 @@ class ProgramNode(AstNode):
         self.block.build(symtab)
 
 
+class ProcedureDectNode(AstNode):
+    def __init__(self, proc_name, block_node):
+        self.proc_name = proc_name
+        self.block_node = block_node
+
+    def visit(self):
+        pass
+
+    def build(self, symtab):
+        pass
+
+
 class BlockNode(AstNode):
     def __init__(self, declarations, compound_statement):
         self.declarations = declarations
         self.compound_statement = compound_statement
 
     def visit(self):
+        for declaration in self.declarations:
+            declaration.visit()
         self.compound_statement.visit()
 
     def build(self, symtab):
@@ -420,17 +436,27 @@ class Parser(object):
 
     def declarations(self):
         """declarations : VAR (variable_declaration SEMI)+
+                        | (PROCEDURE ID SEMI block SEMI)*
                         | empty
         """
+        declarations = []
+        if self.current_token.type == VAR:
+            self.eat(VAR)
+            while self.current_token.type == ID:
+                declarations += self.variable_declaration()
+                self.eat(SEMI)
 
-        if not self.current_token.type == VAR:
+        while self.current_token.type == PROCEDURE:
+            self.eat(PROCEDURE)
+            name = self.current_token
+            self.eat(ID)
+            self.eat(SEMI)
+            declarations.append(ProcedureDectNode(name, self.block()))
+            self.eat(SEMI)
+
+        if not declarations:
             return self.empty()
 
-        self.eat(VAR)
-        declarations = []
-        while self.current_token.type == ID:
-            declarations += self.variable_declaration()
-            self.eat(SEMI)
         return declarations
 
     def variable_declaration(self):
@@ -581,20 +607,36 @@ class SymbolTableBuilder(object):
 
 
 text = """
-PROGRAM Part11;
+PROGRAM Part12;
 VAR
-   x, y : INTEGER;
-BEGIN
-   x := 2;
-   y := 3 + x;
-END.
+   a : INTEGER;
+
+PROCEDURE P1;
+VAR
+   a : REAL;
+   k : INTEGER;
+
+   PROCEDURE P2;
+   VAR
+      a, z : INTEGER;
+   BEGIN {P2}
+      z := 777;
+   END;  {P2}
+
+BEGIN {P1}
+
+END;  {P1}
+
+BEGIN {Part12}
+   a := 10;
+END.  {Part12}
 """
 
 if __name__ == '__main__':
     lexer = Lexer(text)
     parser = Parser(lexer)
-    builder = SymbolTableBuilder(parser)
-    builder.build()
-    # interpreter = Interpreter(parser)
-    # interpreter.execute()
-    # print GLOBAL_SCOPE
+    # builder = SymbolTableBuilder(parser)
+    # builder.build()
+    interpreter = Interpreter(parser)
+    interpreter.execute()
+    print GLOBAL_SCOPE
