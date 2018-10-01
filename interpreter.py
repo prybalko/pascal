@@ -110,7 +110,7 @@ class Lexer(object):
         """Handle identifiers and reserved keywords"""
         result = ''
         while self.current_pos < len(self.text) and self.text[self.current_pos].isalnum():
-            result += self.text[self.current_pos]
+            result += self.text[self.current_pos].upper()
             self.advance()
         return RESERVED_KEYWORDS.get(result, Token(ID, result))
 
@@ -588,22 +588,20 @@ class Parser(object):
 
 
 class Interpreter(object):
-    def __init__(self, lexer):
-        self.lexer = lexer
+    def __init__(self, tree):
+        self.tree = tree
 
     def execute(self):
-        root_node = self.lexer.program()
-        return root_node.visit()
+        return self.tree.visit()
 
 
 class SymbolTableBuilder(object):
-    def __init__(self, lexer):
+    def __init__(self, tree):
         self.symtab = SymbolTable()
-        self.lexer = lexer
+        self.tree = tree
 
     def build(self):
-        root_node = self.lexer.program()
-        return root_node.build(self.symtab)
+        return self.tree.build(self.symtab)
 
 
 text = """
@@ -635,8 +633,12 @@ END.  {Part12}
 if __name__ == '__main__':
     lexer = Lexer(text)
     parser = Parser(lexer)
-    # builder = SymbolTableBuilder(parser)
-    # builder.build()
-    interpreter = Interpreter(parser)
+    root_node = parser.program()
+
+    builder = SymbolTableBuilder(root_node)
+    builder.build()
+
+    interpreter = Interpreter(root_node)
     interpreter.execute()
+
     print GLOBAL_SCOPE
