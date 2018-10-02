@@ -214,9 +214,10 @@ class ProgramNode(AstNode):
 
 
 class ProcedureDectNode(AstNode):
-    def __init__(self, proc_name, block_node):
+    def __init__(self, proc_name, params, block_node):
         self.proc_name = proc_name
         self.block_node = block_node
+        self.params = params   # a list of Param nodes
 
     def visit(self):
         pass
@@ -343,6 +344,12 @@ class Assign(AstNode):
         self.value.build(symtab)
 
 
+class ParamNode(AstNode):
+    def __init__(self, var_node, type_node):
+        self.var_node = var_node
+        self.type_node = type_node
+
+
 class Var(AstNode):
     """The Var node is constructed out of ID token."""
 
@@ -387,9 +394,11 @@ class VarSymbol(Symbol):
         return '<{name}:{type}>'.format(name=self.name, type=self.type)
 
 
-class SymbolTable(object):
-    def __init__(self):
+class ScopedSymbolTable(object):
+    def __init__(self, scope_name, scope_level):
         self._symbols = OrderedDict()
+        self.scope_name = scope_name
+        self.scope_level = scope_level
         self._init_builtins()
 
     def _init_builtins(self):
@@ -397,7 +406,16 @@ class SymbolTable(object):
         self.define(BuiltinTypeSymbol('REAL'))
 
     def __str__(self):
-        return 'Symbols: {symbols}'.format(symbols=[value for value in self._symbols.values()])
+        h1 = 'SCOPE (SCOPED SYMBOL TABLE)'
+        lines = ['\n', h1, '=' * len(h1)]
+        for header_name, header_value in (('Scope name', self.scope_name), ('Scope level', self.scope_level)):
+            lines.append('%-15s: %s' % (header_name, header_value))
+        h2 = 'Scope (Scoped symbol table) contents'
+        lines.extend([h2, '-' * len(h2)])
+        lines.extend(('%7s: %r' % (key, value))for key, value in self._symbols.items())
+        lines.append('\n')
+        s = '\n'.join(lines)
+        return s
 
     def define(self, symbol):
         print('Define: %s' % symbol)
@@ -435,8 +453,8 @@ class Parser(object):
         return BlockNode(self.declarations(), self.compound_statement())
 
     def declarations(self):
-        """declarations : VAR (variable_declaration SEMI)+
-                        | (PROCEDURE ID SEMI block SEMI)*
+        """declarations : (VAR (variable_declaration SEMI)+)*
+                        | (PROCEDURE ID (LPAREN formal_parameter_list RPAREN)? SEMI block SEMI)*
                         | empty
         """
         declarations = []
@@ -450,14 +468,45 @@ class Parser(object):
             self.eat(PROCEDURE)
             name = self.current_token
             self.eat(ID)
+
+            if self.current_token.type == LPAREN:
+                self.eat(LPAREN)
+                params = self.formal_parameter_list()
+                self.eat(RPAREN)
+            else:
+                params = EmptyNode()
+
             self.eat(SEMI)
-            declarations.append(ProcedureDectNode(name, self.block()))
+            declarations.append(ProcedureDectNode(name, params, self.block()))
             self.eat(SEMI)
 
         if not declarations:
             return self.empty()
 
         return declarations
+
+    def formal_parameter_list(self):
+        """ formal_parameter_list : formal_parameters
+                                  | formal_parameters SEMI formal_parameter_list
+        """
+        parameter_list = self.formal_parameters()
+        while self.current_token.type == SEMI:
+            self.eat(SEMI)
+            parameter_list += self.formal_parameters()
+        return parameter_list
+
+    def formal_parameters(self):
+        """ formal_parameters : ID (COMMA ID)* COLON type_spec """
+        var_names = [self.current_token]
+        self.eat(ID)
+        while self.current_token.type == COMMA:
+            self.eat(COMMA)
+            var_names.append(self.current_token)
+            self.eat(ID)
+        self.eat(COLON)
+        type_spec = self.current_token
+        self.eat(type_spec.type)
+        return [ParamNode(name, type_spec) for name in var_names]
 
     def variable_declaration(self):
         """variable_declaration : ID (COMMA ID)* COLON type_spec"""
@@ -597,7 +646,7 @@ class Interpreter(object):
 
 class SymbolTableBuilder(object):
     def __init__(self, tree):
-        self.symtab = SymbolTable()
+        self.symtab = ScopedSymbolTable(scope_name='global', scope_level=1)
         self.tree = tree
 
     def build(self):
@@ -605,29 +654,18 @@ class SymbolTableBuilder(object):
 
 
 text = """
-PROGRAM Part12;
-VAR
-   a : INTEGER;
+program Main;
+   var x, y: real;
 
-PROCEDURE P1;
-VAR
-   a : REAL;
-   k : INTEGER;
+   procedure Alpha(a : integer);
+      var y : integer;
+   begin
+      x := a + x + y;
+   end;
 
-   PROCEDURE P2;
-   VAR
-      a, z : INTEGER;
-   BEGIN {P2}
-      z := 777;
-   END;  {P2}
+begin { Main }
 
-BEGIN {P1}
-
-END;  {P1}
-
-BEGIN {Part12}
-   a := 10;
-END.  {Part12}
+end.  { Main }
 """
 
 if __name__ == '__main__':
@@ -637,6 +675,8 @@ if __name__ == '__main__':
 
     builder = SymbolTableBuilder(root_node)
     builder.build()
+
+    print builder.symtab
 
     interpreter = Interpreter(root_node)
     interpreter.execute()
