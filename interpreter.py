@@ -1,4 +1,6 @@
-""" SPI - Simple Pascal Interpreter """
+""" SPI - Simple Pascal Interpreter."""
+
+from collections import OrderedDict
 
 ###############################################################################
 #                                                                             #
@@ -10,8 +12,6 @@
 #
 # EOF (end-of-file) token is used to indicate that
 # there is no more input left for lexical analysis
-from collections import OrderedDict
-
 INTEGER       = 'INTEGER'
 REAL          = 'REAL'
 INTEGER_CONST = 'INTEGER_CONST'
@@ -30,156 +30,187 @@ END           = 'END'
 SEMI          = 'SEMI'
 DOT           = 'DOT'
 PROGRAM       = 'PROGRAM'
-PROCEDURE     = 'PROCEDURE'
 VAR           = 'VAR'
 COLON         = 'COLON'
 COMMA         = 'COMMA'
+PROCEDURE     = 'PROCEDURE'
 EOF           = 'EOF'
 
 
 class Token(object):
-    def __init__(self, type, value=None):
+    def __init__(self, type, value):
         self.type = type
         self.value = value
 
+    def __str__(self):
+        """String representation of the class instance.
+
+        Examples:
+            Token(INTEGER, 3)
+            Token(PLUS, '+')
+            Token(MUL, '*')
+        """
+        return 'Token({type}, {value})'.format(
+            type=self.type,
+            value=repr(self.value)
+        )
+
     def __repr__(self):
-        return '{}({}, {})'.format(self.__class__.__name__, self.type, self.value)
+        return self.__str__()
 
 
 RESERVED_KEYWORDS = {
-    'PROGRAM': Token(PROGRAM, 'PROGRAM'),
-    'VAR': Token(VAR, 'VAR'),
-    'DIV': Token(INTEGER_DIV, 'DIV'),
-    'INTEGER': Token(INTEGER, 'INTEGER'),
-    'REAL': Token(REAL, 'REAL'),
-    'BEGIN': Token(BEGIN, 'BEGIN'),
-    'END': Token(END, 'END'),
+    'PROGRAM': Token('PROGRAM', 'PROGRAM'),
+    'VAR': Token('VAR', 'VAR'),
+    'DIV': Token('INTEGER_DIV', 'DIV'),
+    'INTEGER': Token('INTEGER', 'INTEGER'),
+    'REAL': Token('REAL', 'REAL'),
+    'BEGIN': Token('BEGIN', 'BEGIN'),
+    'END': Token('END', 'END'),
     'PROCEDURE': Token('PROCEDURE', 'PROCEDURE'),
 }
-
-GLOBAL_SCOPE = {}
 
 
 class Lexer(object):
     def __init__(self, text):
-        self.text = text.strip()
-        self.current_pos = 0
+        # client string input, e.g. "4 + 2 * 3 - 6 / 2"
+        self.text = text
+        # self.pos is an index into self.text
+        self.pos = 0
+        self.current_char = self.text[self.pos]
+
+    def error(self):
+        raise Exception('Invalid character')
 
     def advance(self):
-        self.current_pos += 1
-
-    def parse(self):
-        tokens = []
-        for _ in range(len(text)):
-            tokens.append(self.get_next_token())
-            if tokens[-1].type == EOF:
-                break
-        return tokens
+        """Advance the `pos` pointer and set the `current_char` variable."""
+        self.pos += 1
+        if self.pos > len(self.text) - 1:
+            self.current_char = None  # Indicates end of input
+        else:
+            self.current_char = self.text[self.pos]
 
     def peek(self):
-        peek_pos = self.current_pos + 1
-        if peek_pos < len(self.text):
+        peek_pos = self.pos + 1
+        if peek_pos > len(self.text) - 1:
+            return None
+        else:
             return self.text[peek_pos]
 
     def skip_whitespace(self):
-        while self.current_pos < len(self.text) and self.text[self.current_pos].isspace():
+        while self.current_char is not None and self.current_char.isspace():
             self.advance()
 
     def skip_comment(self):
-        while not self.text[self.current_pos] == '}':
+        while self.current_char != '}':
             self.advance()
         self.advance()  # the closing curly brace
 
     def number(self):
         """Return a (multidigit) integer or float consumed from the input."""
         result = ''
-        while self.current_pos < len(self.text) and self.text[self.current_pos].isdigit():
-            result += self.text[self.current_pos]
+        while self.current_char is not None and self.current_char.isdigit():
+            result += self.current_char
             self.advance()
-        if not self.text[self.current_pos] == '.':
-            return Token(INTEGER_CONST, int(result))
 
-        result += '.'
-        self.advance()
-        while self.current_pos < len(self.text) and self.text[self.current_pos].isdigit():
-            result += self.text[self.current_pos]
+        if self.current_char == '.':
+            result += self.current_char
             self.advance()
-        return Token(REAL_CONST, float(result))
+
+            while (
+                self.current_char is not None and
+                self.current_char.isdigit()
+            ):
+                result += self.current_char
+                self.advance()
+
+            token = Token('REAL_CONST', float(result))
+        else:
+            token = Token('INTEGER_CONST', int(result))
+
+        return token
 
     def _id(self):
         """Handle identifiers and reserved keywords"""
         result = ''
-        while self.current_pos < len(self.text) and self.text[self.current_pos].isalnum():
-            result += self.text[self.current_pos].upper()
+        while self.current_char is not None and self.current_char.isalnum():
+            result += self.current_char
             self.advance()
-        return RESERVED_KEYWORDS.get(result, Token(ID, result))
+
+        token = RESERVED_KEYWORDS.get(result.upper(), Token(ID, result))
+        return token
 
     def get_next_token(self):
-        if not self.current_pos < len(self.text):
-            return Token(EOF)
+        """Lexical analyzer (also known as scanner or tokenizer)
 
-        char = self.text[self.current_pos]
+        This method is responsible for breaking a sentence
+        apart into tokens. One token at a time.
+        """
+        while self.current_char is not None:
 
-        if char.isspace():
-            self.skip_whitespace()
-            return self.get_next_token()
+            if self.current_char.isspace():
+                self.skip_whitespace()
+                continue
 
-        if char == '{':
-            self.skip_comment()
-            return self.get_next_token()
+            if self.current_char == '{':
+                self.advance()
+                self.skip_comment()
+                continue
 
-        if char.isalpha():
-            return self._id()
+            if self.current_char.isalpha():
+                return self._id()
 
-        if char.isdigit():
-            return self.number()
+            if self.current_char.isdigit():
+                return self.number()
 
-        if char == '+':
-            self.advance()
-            return Token(PLUS, '+')
+            if self.current_char == ':' and self.peek() == '=':
+                self.advance()
+                self.advance()
+                return Token(ASSIGN, ':=')
 
-        if char == '-':
-            self.advance()
-            return Token(MINUS, '-')
+            if self.current_char == ';':
+                self.advance()
+                return Token(SEMI, ';')
 
-        if char == '*':
-            self.advance()
-            return Token(MUL, '*')
+            if self.current_char == ':':
+                self.advance()
+                return Token(COLON, ':')
 
-        if char == '/':
-            self.advance()
-            return Token(FLOAT_DIV, '/')
+            if self.current_char == ',':
+                self.advance()
+                return Token(COMMA, ',')
 
-        if char == '(':
-            self.advance()
-            return Token(LPAREN, '(')
+            if self.current_char == '+':
+                self.advance()
+                return Token(PLUS, '+')
 
-        if char == ')':
-            self.advance()
-            return Token(RPAREN, '(')
+            if self.current_char == '-':
+                self.advance()
+                return Token(MINUS, '-')
 
-        if char == ':' and self.peek() == '=':
-            self.advance()
-            self.advance()
-            return Token(ASSIGN, ':=')
+            if self.current_char == '*':
+                self.advance()
+                return Token(MUL, '*')
 
-        if char == ':':
-            self.advance()
-            return Token(COLON, ':')
+            if self.current_char == '/':
+                self.advance()
+                return Token(FLOAT_DIV, '/')
 
-        if char == ';':
-            self.advance()
-            return Token(SEMI, ';')
+            if self.current_char == '(':
+                self.advance()
+                return Token(LPAREN, '(')
 
-        if char == '.':
-            self.advance()
-            return Token(DOT, '.')
+            if self.current_char == ')':
+                self.advance()
+                return Token(RPAREN, ')')
 
-        if char == ',':
-            self.advance()
-            return Token(COMMA, ',')
+            if self.current_char == '.':
+                self.advance()
+                return Token(DOT, '.')
 
-        raise SyntaxError('Symbol "{}" is not supported'.format(char))
+            self.error()
+
+        return Token(EOF, None)
 
 
 ###############################################################################
@@ -187,270 +218,126 @@ class Lexer(object):
 #  PARSER                                                                     #
 #                                                                             #
 ###############################################################################
+class AST(object):
+    pass
 
 
-class AstNode(object):
-    def visit(self):
-        raise NotImplementedError
-
-    def build(self, symtab):
-        raise NotImplementedError
-
-    def __repr__(self):
-        return '{}({})'.format(self.__class__.__name__,
-                               ', '.join([attr for attr in dir() if not attr == 'self']))
+class BinOp(AST):
+    def __init__(self, left, op, right):
+        self.left = left
+        self.token = self.op = op
+        self.right = right
 
 
-class ProgramNode(AstNode):
+class Num(AST):
+    def __init__(self, token):
+        self.token = token
+        self.value = token.value
+
+
+class UnaryOp(AST):
+    def __init__(self, op, expr):
+        self.token = self.op = op
+        self.expr = expr
+
+
+class Compound(AST):
+    """Represents a 'BEGIN ... END' block"""
+    def __init__(self):
+        self.children = []
+
+
+class Assign(AST):
+    def __init__(self, left, op, right):
+        self.left = left
+        self.token = self.op = op
+        self.right = right
+
+
+class Var(AST):
+    """The Var node is constructed out of ID token."""
+    def __init__(self, token):
+        self.token = token
+        self.value = token.value
+
+
+class NoOp(AST):
+    pass
+
+
+class Program(AST):
     def __init__(self, name, block):
         self.name = name
         self.block = block
 
-    def visit(self):
-        self.block.visit()
 
-    def build(self, symtab):
-        self.block.build(symtab)
-
-
-class ProcedureDectNode(AstNode):
-    def __init__(self, proc_name, params, block_node):
-        self.proc_name = proc_name
-        self.block_node = block_node
-        self.params = params   # a list of Param nodes
-
-    def visit(self):
-        pass
-
-    def build(self, symtab):
-        pass
-
-
-class BlockNode(AstNode):
+class Block(AST):
     def __init__(self, declarations, compound_statement):
         self.declarations = declarations
         self.compound_statement = compound_statement
 
-    def visit(self):
-        for declaration in self.declarations:
-            declaration.visit()
-        self.compound_statement.visit()
 
-    def build(self, symtab):
-        for declaration in self.declarations:
-            declaration.build(symtab)
-        self.compound_statement.build(symtab)
-
-
-class VarDeclNode(AstNode):
+class VarDecl(AST):
     def __init__(self, var_node, type_node):
         self.var_node = var_node
         self.type_node = type_node
 
-    def visit(self):
-        pass
 
-    def build(self, symtab):
-        type_name = self.type_node.value
-        type_symbol = symtab.lookup(type_name)
-        var_name = self.var_node.value
-        var_symbol = VarSymbol(var_name, type_symbol)
-        symtab.define(var_symbol)
-
-
-class BinOp(AstNode):
-    def __init__(self, op, left, right):
-        self.left = left
-        self.op = op
-        self.right = right
-
-    def visit(self):
-        left = self.left.visit()
-        right = self.right.visit()
-        if self.op.type == PLUS:
-            return left + right
-        if self.op.type == MINUS:
-            return left - right
-        if self.op.type == MUL:
-            return left * right
-        if self.op.type == INTEGER_DIV:
-            return left // right
-        if self.op.type == FLOAT_DIV:
-            return float(left) / right
-
-    def build(self, symtab):
-        self.left.build(symtab)
-        self.right.build(symtab)
-
-
-class UnaryOp(AstNode):
-    def __init__(self, op, left):
-        self.left = left
-        self.op = op
-
-    def visit(self):
-        value = self.left.visit()
-        if self.op.type == MINUS:
-            return -1 * value
-        if self.op.type == PLUS:
-            return value
-        raise Exception('Unsupported unary operation')
-
-    def build(self, symtab):
-        self.left.build(symtab)
-
-
-class NumNode(AstNode):
+class Type(AST):
     def __init__(self, token):
         self.token = token
-
-    def visit(self):
-        return self.token.value
-
-    def build(self, symtab):
-        pass
+        self.value = token.value
 
 
-class Compound(AstNode):
-    """Represents a 'BEGIN ... END' block"""
-
-    def __init__(self, children):
-        self.children = children
-
-    def visit(self):
-        for child in self.children:
-            child.visit()
-
-    def build(self, symtab):
-        for child in self.children:
-            child.build(symtab)
-
-
-class Assign(AstNode):
-
-    def __init__(self, var, value):
-        self.var = var
-        self.value = value
-
-    def visit(self):
-        GLOBAL_SCOPE[self.var.name] = self.value.visit()
-
-    def build(self, symtab):
-        var_name = self.var.name
-        var_symbol = symtab.lookup(var_name)
-        if var_symbol is None:
-            raise NameError(repr(var_name))
-
-        self.value.build(symtab)
-
-
-class ParamNode(AstNode):
+class Param(AST):
     def __init__(self, var_node, type_node):
         self.var_node = var_node
         self.type_node = type_node
 
 
-class Var(AstNode):
-    """The Var node is constructed out of ID token."""
-
-    def __init__(self, id_token):
-        self.id_token = id_token
-        self.name = id_token.value
-
-    def visit(self):
-        return GLOBAL_SCOPE[self.id_token.value]
-
-    def build(self, symtab):
-        var_name = self.id_token.value
-        var_symbol = symtab.lookup(var_name)
-
-        if var_symbol is None:
-            raise NameError(repr(var_name))
-
-
-class EmptyNode(AstNode):
-    def visit(self):
-        pass
-
-    def build(self, symtab):
-        pass
-
-
-class Symbol(object):
-    def __init__(self, name, type=None):
-        self.name = name
-        self.type = type
-
-
-class BuiltinTypeSymbol(Symbol):
-
-    def __str__(self):
-        return self.name
-
-
-class VarSymbol(Symbol):
-
-    def __str__(self):
-        return '<{name}:{type}>'.format(name=self.name, type=self.type)
-
-
-class ScopedSymbolTable(object):
-    def __init__(self, scope_name, scope_level):
-        self._symbols = OrderedDict()
-        self.scope_name = scope_name
-        self.scope_level = scope_level
-        self._init_builtins()
-
-    def _init_builtins(self):
-        self.define(BuiltinTypeSymbol('INTEGER'))
-        self.define(BuiltinTypeSymbol('REAL'))
-
-    def __str__(self):
-        h1 = 'SCOPE (SCOPED SYMBOL TABLE)'
-        lines = ['\n', h1, '=' * len(h1)]
-        for header_name, header_value in (('Scope name', self.scope_name), ('Scope level', self.scope_level)):
-            lines.append('%-15s: %s' % (header_name, header_value))
-        h2 = 'Scope (Scoped symbol table) contents'
-        lines.extend([h2, '-' * len(h2)])
-        lines.extend(('%7s: %r' % (key, value))for key, value in self._symbols.items())
-        lines.append('\n')
-        s = '\n'.join(lines)
-        return s
-
-    def define(self, symbol):
-        print('Define: %s' % symbol)
-        self._symbols[symbol.name] = symbol
-
-    def lookup(self, name):
-        print('Lookup: %s' % name)
-        symbol = self._symbols.get(name)
-        # 'symbol' is either an instance of the Symbol class or 'None'
-        return symbol
+class ProcedureDecl(AST):
+    def __init__(self, proc_name, params, block_node):
+        self.proc_name = proc_name
+        self.params = params  # a list of Param nodes
+        self.block_node = block_node
 
 
 class Parser(object):
     def __init__(self, lexer):
         self.lexer = lexer
+        # set current token to the first token taken from the input
         self.current_token = self.lexer.get_next_token()
 
-    def eat(self, expected_type):
-        if not self.current_token.type == expected_type:
-            raise ValueError('Unexpected token. Expected {}, got {}'.format(expected_type, self.current_token.type))
-        self.current_token = self.lexer.get_next_token()
+    def error(self):
+        raise Exception('Invalid syntax')
+
+    def eat(self, token_type):
+        # compare the current token type with the passed token
+        # type and if they match then "eat" the current token
+        # and assign the next token to the self.current_token,
+        # otherwise raise an exception.
+        if self.current_token.type == token_type:
+            self.current_token = self.lexer.get_next_token()
+        else:
+            self.error()
 
     def program(self):
         """program : PROGRAM variable SEMI block DOT"""
         self.eat(PROGRAM)
-        name = self.current_token.value
-        self.eat(ID)
+        var_node = self.variable()
+        prog_name = var_node.value
         self.eat(SEMI)
-        block = self.block()
+        block_node = self.block()
+        program_node = Program(prog_name, block_node)
         self.eat(DOT)
-        return ProgramNode(name, block)
+        return program_node
 
     def block(self):
         """block : declarations compound_statement"""
-        return BlockNode(self.declarations(), self.compound_statement())
+        declaration_nodes = self.declarations()
+        compound_statement_node = self.compound_statement()
+        node = Block(declaration_nodes, compound_statement_node)
+        return node
 
     def declarations(self):
         """declarations : (VAR (variable_declaration SEMI)+)*
@@ -458,88 +345,135 @@ class Parser(object):
                         | empty
         """
         declarations = []
-        if self.current_token.type == VAR:
-            self.eat(VAR)
-            while self.current_token.type == ID:
-                declarations += self.variable_declaration()
+
+        while True:
+            if self.current_token.type == VAR:
+                self.eat(VAR)
+                while self.current_token.type == ID:
+                    var_decl = self.variable_declaration()
+                    declarations.extend(var_decl)
+                    self.eat(SEMI)
+
+            elif self.current_token.type == PROCEDURE:
+                self.eat(PROCEDURE)
+                proc_name = self.current_token.value
+                self.eat(ID)
+                params = []
+
+                if self.current_token.type == LPAREN:
+                    self.eat(LPAREN)
+
+                    params = self.formal_parameter_list()
+
+                    self.eat(RPAREN)
+
                 self.eat(SEMI)
-
-        while self.current_token.type == PROCEDURE:
-            self.eat(PROCEDURE)
-            name = self.current_token
-            self.eat(ID)
-
-            if self.current_token.type == LPAREN:
-                self.eat(LPAREN)
-                params = self.formal_parameter_list()
-                self.eat(RPAREN)
+                block_node = self.block()
+                proc_decl = ProcedureDecl(proc_name, params, block_node)
+                declarations.append(proc_decl)
+                self.eat(SEMI)
             else:
-                params = EmptyNode()
-
-            self.eat(SEMI)
-            declarations.append(ProcedureDectNode(name, params, self.block()))
-            self.eat(SEMI)
-
-        if not declarations:
-            return self.empty()
+                break
 
         return declarations
+
+    def formal_parameters(self):
+        """ formal_parameters : ID (COMMA ID)* COLON type_spec """
+        param_nodes = []
+
+        param_tokens = [self.current_token]
+        self.eat(ID)
+        while self.current_token.type == COMMA:
+            self.eat(COMMA)
+            param_tokens.append(self.current_token)
+            self.eat(ID)
+
+        self.eat(COLON)
+        type_node = self.type_spec()
+
+        for param_token in param_tokens:
+            param_node = Param(Var(param_token), type_node)
+            param_nodes.append(param_node)
+
+        return param_nodes
+
 
     def formal_parameter_list(self):
         """ formal_parameter_list : formal_parameters
                                   | formal_parameters SEMI formal_parameter_list
         """
-        parameter_list = self.formal_parameters()
+        # procedure Foo();
+        if not self.current_token.type == ID:
+            return []
+
+        param_nodes = self.formal_parameters()
+
         while self.current_token.type == SEMI:
             self.eat(SEMI)
-            parameter_list += self.formal_parameters()
-        return parameter_list
+            param_nodes.extend(self.formal_parameters())
 
-    def formal_parameters(self):
-        """ formal_parameters : ID (COMMA ID)* COLON type_spec """
-        var_names = [self.current_token]
-        self.eat(ID)
-        while self.current_token.type == COMMA:
-            self.eat(COMMA)
-            var_names.append(self.current_token)
-            self.eat(ID)
-        self.eat(COLON)
-        type_spec = self.current_token
-        self.eat(type_spec.type)
-        return [ParamNode(name, type_spec) for name in var_names]
+        return param_nodes
+
 
     def variable_declaration(self):
         """variable_declaration : ID (COMMA ID)* COLON type_spec"""
-        var_names = [self.current_token]
+        var_nodes = [Var(self.current_token)]  # first ID
         self.eat(ID)
+
         while self.current_token.type == COMMA:
             self.eat(COMMA)
-            var_names.append(self.current_token)
+            var_nodes.append(Var(self.current_token))
             self.eat(ID)
+
         self.eat(COLON)
-        type_spec = self.current_token
-        self.eat(type_spec.type)
-        return [VarDeclNode(name, type_spec) for name in var_names]
+
+        type_node = self.type_spec()
+        var_declarations = [
+            VarDecl(var_node, type_node)
+            for var_node in var_nodes
+        ]
+        return var_declarations
+
+    def type_spec(self):
+        """type_spec : INTEGER
+                     | REAL
+        """
+        token = self.current_token
+        if self.current_token.type == INTEGER:
+            self.eat(INTEGER)
+        else:
+            self.eat(REAL)
+        node = Type(token)
+        return node
 
     def compound_statement(self):
         """
         compound_statement: BEGIN statement_list END
         """
         self.eat(BEGIN)
-        statements = self.statement_list()
+        nodes = self.statement_list()
         self.eat(END)
-        return Compound(statements)
+
+        root = Compound()
+        for node in nodes:
+            root.children.append(node)
+
+        return root
 
     def statement_list(self):
         """
         statement_list : statement
                        | statement SEMI statement_list
         """
-        statements = [self.statement()]
+        node = self.statement()
+
+        results = [node]
+
         while self.current_token.type == SEMI:
             self.eat(SEMI)
-            statements.append(self.statement())
-        return statements
+            results.append(self.statement())
+
+        return results
 
     def statement(self):
         """
@@ -547,86 +481,379 @@ class Parser(object):
                   | assignment_statement
                   | empty
         """
-        token = self.current_token
-        if token.type == BEGIN:
-            return self.compound_statement()
-        if token.type == ID:
-            return self.assign_statement()
-        if token.type == END:
-            return self.empty()
-        raise SyntaxError('Unexpected token type. Got {}'.format(self.current_token.type))
+        if self.current_token.type == BEGIN:
+            node = self.compound_statement()
+        elif self.current_token.type == ID:
+            node = self.assignment_statement()
+        else:
+            node = self.empty()
+        return node
 
-    def assign_statement(self):
+    def assignment_statement(self):
         """
         assignment_statement : variable ASSIGN expr
         """
-        var = self.variable()
+        left = self.variable()
+        token = self.current_token
         self.eat(ASSIGN)
-        expr = self.expr()
-        return Assign(var, expr)
+        right = self.expr()
+        node = Assign(left, token, right)
+        return node
 
     def variable(self):
         """
         variable : ID
         """
-        var_name = self.current_token
+        node = Var(self.current_token)
         self.eat(ID)
-        return Var(var_name)
+        return node
 
     def empty(self):
-        return EmptyNode()
+        """An empty production"""
+        return NoOp()
 
     def expr(self):
         """
-            expr   : term ((PLUS | MINUS) term)*
-            term   : factor ((MUL | DIV) factor)*
-            factor : INTEGER | LPAREN expr RPAREN
+        expr : term ((PLUS | MINUS) term)*
         """
-        result = self.term()
+        node = self.term()
+
         while self.current_token.type in (PLUS, MINUS):
-            op = self.current_token
-            self.eat(self.current_token.type)
-            right = self.term()
-            result = BinOp(op, result, right)
-        return result
+            token = self.current_token
+            if token.type == PLUS:
+                self.eat(PLUS)
+            elif token.type == MINUS:
+                self.eat(MINUS)
+
+            node = BinOp(left=node, op=token, right=self.term())
+
+        return node
 
     def term(self):
         """term : factor ((MUL | INTEGER_DIV | FLOAT_DIV) factor)*"""
-        result = self.factor()
+        node = self.factor()
+
         while self.current_token.type in (MUL, INTEGER_DIV, FLOAT_DIV):
-            op = self.current_token
-            self.eat(self.current_token.type)
-            right = self.factor()
-            result = BinOp(op, result, right)
-        return result
+            token = self.current_token
+            if token.type == MUL:
+                self.eat(MUL)
+            elif token.type == INTEGER_DIV:
+                self.eat(INTEGER_DIV)
+            elif token.type == FLOAT_DIV:
+                self.eat(FLOAT_DIV)
+
+            node = BinOp(left=node, op=token, right=self.factor())
+
+        return node
 
     def factor(self):
         """factor : PLUS factor
-                   | MINUS factor
-                   | INTEGER_CONST
-                   | REAL_CONST
-                   | LPAREN expr RPAREN
-                   | variable
+                  | MINUS factor
+                  | INTEGER_CONST
+                  | REAL_CONST
+                  | LPAREN expr RPAREN
+                  | variable
         """
         token = self.current_token
-        if token.type in (INTEGER_CONST, REAL_CONST):
-            self.eat(token.type)
-            return NumNode(token)
-
-        if token.type == LPAREN:
+        if token.type == PLUS:
+            self.eat(PLUS)
+            node = UnaryOp(token, self.factor())
+            return node
+        elif token.type == MINUS:
+            self.eat(MINUS)
+            node = UnaryOp(token, self.factor())
+            return node
+        elif token.type == INTEGER_CONST:
+            self.eat(INTEGER_CONST)
+            return Num(token)
+        elif token.type == REAL_CONST:
+            self.eat(REAL_CONST)
+            return Num(token)
+        elif token.type == LPAREN:
             self.eat(LPAREN)
-            result = self.expr()
+            node = self.expr()
             self.eat(RPAREN)
-            return result
+            return node
+        else:
+            node = self.variable()
+            return node
 
-        if token.type in (PLUS, MINUS):
-            self.eat(token.type)
-            operand = self.factor()
-            return UnaryOp(token, operand)
+    def parse(self):
+        """
+        program : PROGRAM variable SEMI block DOT
 
-        if token.type == ID:
-            return self.variable()
-        raise SyntaxError('Unexpected token type. Got {}'.format(token))
+        block : declarations compound_statement
+
+        declarations : (VAR (variable_declaration SEMI)+)*
+           | (PROCEDURE ID (LPAREN formal_parameter_list RPAREN)? SEMI block SEMI)*
+           | empty
+
+        variable_declaration : ID (COMMA ID)* COLON type_spec
+
+        formal_params_list : formal_parameters
+                           | formal_parameters SEMI formal_parameter_list
+
+        formal_parameters : ID (COMMA ID)* COLON type_spec
+
+        type_spec : INTEGER
+
+        compound_statement : BEGIN statement_list END
+
+        statement_list : statement
+                       | statement SEMI statement_list
+
+        statement : compound_statement
+                  | assignment_statement
+                  | empty
+
+        assignment_statement : variable ASSIGN expr
+
+        empty :
+
+        expr : term ((PLUS | MINUS) term)*
+
+        term : factor ((MUL | INTEGER_DIV | FLOAT_DIV) factor)*
+
+        factor : PLUS factor
+               | MINUS factor
+               | INTEGER_CONST
+               | REAL_CONST
+               | LPAREN expr RPAREN
+               | variable
+
+        variable: ID
+        """
+        node = self.program()
+        if self.current_token.type != EOF:
+            self.error()
+
+        return node
+
+
+###############################################################################
+#                                                                             #
+#  AST visitors (walkers)                                                     #
+#                                                                             #
+###############################################################################
+
+class NodeVisitor(object):
+    def visit(self, node):
+        method_name = 'visit_' + type(node).__name__
+        visitor = getattr(self, method_name, self.generic_visit)
+        return visitor(node)
+
+    def generic_visit(self, node):
+        raise Exception('No visit_{} method'.format(type(node).__name__))
+
+
+###############################################################################
+#                                                                             #
+#  SYMBOLS, TABLES, SEMANTIC ANALYSIS                                         #
+#                                                                             #
+###############################################################################
+
+class Symbol(object):
+    def __init__(self, name, type=None):
+        self.name = name
+        self.type = type
+
+
+class VarSymbol(Symbol):
+    def __init__(self, name, type):
+        super(VarSymbol, self).__init__(name, type)
+
+    def __str__(self):
+        return "<{class_name}(name='{name}', type='{type}')>".format(
+            class_name=self.__class__.__name__,
+            name=self.name,
+            type=self.type,
+        )
+
+    __repr__ = __str__
+
+
+class BuiltinTypeSymbol(Symbol):
+    def __init__(self, name):
+        super(BuiltinTypeSymbol, self).__init__(name)
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return "<{class_name}(name='{name}')>".format(
+            class_name=self.__class__.__name__,
+            name=self.name,
+        )
+
+
+class ProcedureSymbol(Symbol):
+    def __init__(self, name, params=None):
+        super(ProcedureSymbol, self).__init__(name)
+        # a list of formal parameters
+        self.params = params if params is not None else []
+
+    def __str__(self):
+        return '<{class_name}(name={name}, parameters={params})>'.format(
+            class_name=self.__class__.__name__,
+            name=self.name,
+            params=self.params,
+        )
+
+    __repr__ = __str__
+
+
+class ScopedSymbolTable(object):
+    def __init__(self, scope_name, scope_level, enclosing_scope=None):
+        self._symbols = OrderedDict()
+        self.scope_name = scope_name
+        self.scope_level = scope_level
+        self.enclosing_scope = enclosing_scope
+
+    def _init_builtins(self):
+        self.insert(BuiltinTypeSymbol('INTEGER'))
+        self.insert(BuiltinTypeSymbol('REAL'))
+
+    def __str__(self):
+        h1 = 'SCOPE (SCOPED SYMBOL TABLE)'
+        lines = ['\n', h1, '=' * len(h1)]
+        for header_name, header_value in (
+            ('Scope name', self.scope_name),
+            ('Scope level', self.scope_level),
+            ('Enclosing scope',
+             self.enclosing_scope.scope_name if self.enclosing_scope else None
+            )
+        ):
+            lines.append('%-15s: %s' % (header_name, header_value))
+        h2 = 'Scope (Scoped symbol table) contents'
+        lines.extend([h2, '-' * len(h2)])
+        lines.extend(
+            ('%7s: %r' % (key, value))
+            for key, value in self._symbols.items()
+        )
+        lines.append('\n')
+        s = '\n'.join(lines)
+        return s
+
+    __repr__ = __str__
+
+    def insert(self, symbol):
+        print('Insert: %s' % symbol.name)
+        self._symbols[symbol.name] = symbol
+
+    def lookup(self, name, current_scope_only=False):
+        print('Lookup: %s. (Scope name: %s)' % (name, self.scope_name))
+        # 'symbol' is either an instance of the Symbol class or None
+        symbol = self._symbols.get(name)
+
+        if symbol is not None:
+            return symbol
+
+        if current_scope_only:
+            return None
+
+        # recursively go up the chain and lookup the name
+        if self.enclosing_scope is not None:
+            return self.enclosing_scope.lookup(name)
+
+
+class SemanticAnalyzer(NodeVisitor):
+    def __init__(self):
+        self.current_scope = None
+
+    def visit_Block(self, node):
+        for declaration in node.declarations:
+            self.visit(declaration)
+        self.visit(node.compound_statement)
+
+    def visit_Program(self, node):
+        print('ENTER scope: global')
+        global_scope = ScopedSymbolTable(
+            scope_name='global',
+            scope_level=1,
+            enclosing_scope=self.current_scope, # None
+        )
+        global_scope._init_builtins()
+        self.current_scope = global_scope
+
+        # visit subtree
+        self.visit(node.block)
+
+        print(global_scope)
+
+        self.current_scope = self.current_scope.enclosing_scope
+        print('LEAVE scope: global')
+
+    def visit_Compound(self, node):
+        for child in node.children:
+            self.visit(child)
+
+    def visit_NoOp(self, node):
+        pass
+
+    def visit_BinOp(self, node):
+        self.visit(node.left)
+        self.visit(node.right)
+
+    def visit_ProcedureDecl(self, node):
+        proc_name = node.proc_name
+        proc_symbol = ProcedureSymbol(proc_name)
+        self.current_scope.insert(proc_symbol)
+
+        print('ENTER scope: %s' %  proc_name)
+        # Scope for parameters and local variables
+        procedure_scope = ScopedSymbolTable(
+            scope_name=proc_name,
+            scope_level=self.current_scope.scope_level + 1,
+            enclosing_scope=self.current_scope
+        )
+        self.current_scope = procedure_scope
+
+        # Insert parameters into the procedure scope
+        for param in node.params:
+            param_type = self.current_scope.lookup(param.type_node.value)
+            param_name = param.var_node.value
+            var_symbol = VarSymbol(param_name, param_type)
+            self.current_scope.insert(var_symbol)
+            proc_symbol.params.append(var_symbol)
+
+        self.visit(node.block_node)
+
+        print(procedure_scope)
+
+        self.current_scope = self.current_scope.enclosing_scope
+        print('LEAVE scope: %s' %  proc_name)
+
+    def visit_VarDecl(self, node):
+        type_name = node.type_node.value
+        type_symbol = self.current_scope.lookup(type_name)
+
+        # We have all the information we need to create a variable symbol.
+        # Create the symbol and insert it into the symbol table.
+        var_name = node.var_node.value
+        var_symbol = VarSymbol(var_name, type_symbol)
+
+        # Signal an error if the table alrady has a symbol
+        # with the same name
+        if self.current_scope.lookup(var_name, current_scope_only=True):
+            raise Exception(
+                "Error: Duplicate identifier '%s' found" % var_name
+            )
+
+        self.current_scope.insert(var_symbol)
+
+    def visit_Assign(self, node):
+        # right-hand side
+        self.visit(node.right)
+        # left-hand side
+        self.visit(node.left)
+
+    def visit_Var(self, node):
+        var_name = node.value
+        var_symbol = self.current_scope.lookup(var_name)
+        if var_symbol is None:
+            raise Exception(
+                "Error: Symbol(identifier) not found '%s'" % var_name
+            )
 
 
 ###############################################################################
@@ -635,50 +862,97 @@ class Parser(object):
 #                                                                             #
 ###############################################################################
 
-
-class Interpreter(object):
+class Interpreter(NodeVisitor):
     def __init__(self, tree):
         self.tree = tree
+        self.GLOBAL_MEMORY = OrderedDict()
 
-    def execute(self):
-        return self.tree.visit()
+    def visit_Program(self, node):
+        self.visit(node.block)
+
+    def visit_Block(self, node):
+        for declaration in node.declarations:
+            self.visit(declaration)
+        self.visit(node.compound_statement)
+
+    def visit_VarDecl(self, node):
+        # Do nothing
+        pass
+
+    def visit_Type(self, node):
+        # Do nothing
+        pass
+
+    def visit_BinOp(self, node):
+        if node.op.type == PLUS:
+            return self.visit(node.left) + self.visit(node.right)
+        elif node.op.type == MINUS:
+            return self.visit(node.left) - self.visit(node.right)
+        elif node.op.type == MUL:
+            return self.visit(node.left) * self.visit(node.right)
+        elif node.op.type == INTEGER_DIV:
+            return self.visit(node.left) // self.visit(node.right)
+        elif node.op.type == FLOAT_DIV:
+            return float(self.visit(node.left)) / float(self.visit(node.right))
+
+    def visit_Num(self, node):
+        return node.value
+
+    def visit_UnaryOp(self, node):
+        op = node.op.type
+        if op == PLUS:
+            return +self.visit(node.expr)
+        elif op == MINUS:
+            return -self.visit(node.expr)
+
+    def visit_Compound(self, node):
+        for child in node.children:
+            self.visit(child)
+
+    def visit_Assign(self, node):
+        var_name = node.left.value
+        var_value = self.visit(node.right)
+        self.GLOBAL_MEMORY[var_name] = var_value
+
+    def visit_Var(self, node):
+        var_name = node.value
+        var_value = self.GLOBAL_MEMORY.get(var_name)
+        return var_value
+
+    def visit_NoOp(self, node):
+        pass
+
+    def visit_ProcedureDecl(self, node):
+        pass
+
+    def interpret(self):
+        tree = self.tree
+        if tree is None:
+            return ''
+        return self.visit(tree)
 
 
-class SymbolTableBuilder(object):
-    def __init__(self, tree):
-        self.symtab = ScopedSymbolTable(scope_name='global', scope_level=1)
-        self.tree = tree
+def main():
+    import sys
+    text = open(sys.argv[1], 'r').read()
 
-    def build(self):
-        return self.tree.build(self.symtab)
-
-
-text = """
-program Main;
-   var x, y: real;
-
-   procedure Alpha(a : integer);
-      var y : integer;
-   begin
-      x := a + x + y;
-   end;
-
-begin { Main }
-
-end.  { Main }
-"""
-
-if __name__ == '__main__':
     lexer = Lexer(text)
     parser = Parser(lexer)
-    root_node = parser.program()
+    tree = parser.parse()
 
-    builder = SymbolTableBuilder(root_node)
-    builder.build()
+    semantic_analyzer = SemanticAnalyzer()
+    try:
+        semantic_analyzer.visit(tree)
+    except Exception as e:
+        print(e)
 
-    print builder.symtab
+    # interpreter = Interpreter(tree)
+    # result = interpreter.interpret()
+    # print('')
+    # print('Run-time GLOBAL_MEMORY contents:')
+    # for k, v in sorted(interpreter.GLOBAL_MEMORY.items()):
+    #     print('%s = %s' % (k, v))
 
-    interpreter = Interpreter(root_node)
-    interpreter.execute()
 
-    print GLOBAL_SCOPE
+if __name__ == '__main__':
+    main()
